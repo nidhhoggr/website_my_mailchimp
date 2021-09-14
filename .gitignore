@@ -1,6 +1,7 @@
 /target
 /templates/top.html
 /templates/bottom.html
-/scraped/*
-/build/*
+/scraped/*.html
+/scraped/latest.txt
+/build/*.html
 config.ini
