@@ -1,0 +1,19 @@
+[package]
+name = "website_my_mailchimp"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+scraper = "0.12.0"
+reqwest = {version = "0.11.4", features = ["blocking"]}
+configparser = "2.1.0"
+rusoto_core = "0.47.0"
+rusoto_cloudfront = "0.47.0"
+rusoto_s3 = "0.47.0"
+rusoto_credential = "0.47.0"
+rand = "0.8.4"
+futures = "0.3.17"
+bytes = "1.1.0"
+tokio = { version = "1.11.0", features = ["full"] }

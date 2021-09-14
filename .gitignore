@@ -1,0 +1,6 @@
+/target
+/templates/top.html
+/templates/bottom.html
+/scraped/*
+/build/*
+config.ini
