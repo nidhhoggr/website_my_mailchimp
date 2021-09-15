@@ -22,8 +22,16 @@ struct Config {
     mc_campaign_url: String,
     s3_bucket: String,
     cf_distro_id: String,
-    region: Region,
+    region: String,
     profile: String
+}
+
+impl Config {
+    fn region(&self) -> Region {
+        let region: Region = self.region.parse().unwrap();
+
+        region
+    }
 }
 
 fn remove_whitespace(s: &str) -> String {
@@ -37,18 +45,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let latest_res: LatestResult = get_latest(&config.mc_campaign_url)?;
     println!("Latest link: {}", latest_res.link);
 
-    let s3_client = get_s3_client()?;
+    let s3_client = get_s3_client(&config)?;
     
-    let s3_latest = get_s3_latest(&s3_client)?;
+    let s3_latest = get_s3_latest(&config, &s3_client)?;
     println!("Latest link from S3: {}", s3_latest);
     if s3_latest.ne(&latest_res.link) {
         println!("Running jobs!");
         build_index(&latest_res)?;
         let archive_html = get_archive(&config.mc_campaign_url)?;
         build_archive(archive_html)?;
-        deploy_build(&s3_client)?;
-        create_invalidation()?;
-        put_s3_latest(&s3_client)?;
+        deploy_build(&config, &s3_client)?;
+        create_invalidation(&config)?;
+        put_s3_latest(&config, &s3_client)?;
     }
     else {
         println!("File already matches");
@@ -65,7 +73,7 @@ fn parse_config() -> Result<Config, Box<dyn std::error::Error>> {
 	let s3_bucket = config.get("aws", "s3_bucket").unwrap();
 	let cf_distro_id = config.get("aws", "cf_distro_id").unwrap();
 	let profile = config.get("aws", "profile").unwrap();
-	let region: Region = config.get("aws", "region").unwrap().parse().unwrap();
+	let region = config.get("aws", "region").unwrap();
     
     Ok(Config {
         mc_campaign_url,
@@ -169,21 +177,20 @@ fn get_archive(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     Ok(node.html())
 }
 
-fn get_s3_client() -> Result<S3Client, Box<dyn std::error::Error>> {
-    let config = parse_config()?;
+fn get_s3_client(config: &Config) -> Result<S3Client, Box<dyn std::error::Error>> {
+    //let config = parse_config()?;
 
     let provider = ProfileProvider::with_default_credentials(&config.profile);
     let client = S3Client::new_with(
         HttpClient::new().unwrap(),
         provider.unwrap(),
-        config.region,
+        config.region(),
     );
 
     Ok(client)
 }
 
-fn get_s3_latest(client: &S3Client) -> Result<String, Box<dyn std::error::Error>> {
-    let config = parse_config()?;
+fn get_s3_latest(config: &Config, client: &S3Client) -> Result<String, Box<dyn std::error::Error>> {
 
     let get_req = GetObjectRequest {
         bucket: config.s3_bucket.to_owned(),
@@ -201,8 +208,7 @@ fn get_s3_latest(client: &S3Client) -> Result<String, Box<dyn std::error::Error>
     Ok(string)
 }
 
-fn put_s3_latest(client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
-    let config = parse_config()?;
+fn put_s3_latest(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
 
     let contents = get_file_contents("./scraped/latest.txt");
     let meta = ::std::fs::metadata("./scraped/latest.txt").unwrap();
@@ -224,9 +230,7 @@ fn put_s3_latest(client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn deploy_build(client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
-    
-    let config = parse_config()?;
+fn deploy_build(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
     
     let contents = get_file_contents("./build/index.html");
     let meta = ::std::fs::metadata("./build/index.html").unwrap();
@@ -265,15 +269,13 @@ fn deploy_build(client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn create_invalidation() -> Result<(), Box<dyn std::error::Error>> {
-
-    let config = parse_config()?;
+fn create_invalidation(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
 
     let provider = ProfileProvider::with_default_credentials(&config.profile);
     let client = CloudFrontClient::new_with(
         HttpClient::new().unwrap(),
         provider.unwrap(),
-        config.region,
+        config.region(),
     );
 
     let caller_reference: u8 = rand::thread_rng().gen();
@@ -296,7 +298,7 @@ fn create_invalidation() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let request = CreateInvalidationRequest {
-        distribution_id: config.cf_distro_id,
+        distribution_id: config.cf_distro_id.to_string(),
         invalidation_batch: batch
     };
 
