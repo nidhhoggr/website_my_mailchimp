@@ -4,8 +4,8 @@ use std::{fs,str};
 use std::io::Write;
 
 use rusoto_cloudfront::{CloudFront, CloudFrontClient, CreateInvalidationRequest, InvalidationBatch, Paths};
-use rusoto_s3::{S3, S3Client, GetObjectRequest, PutObjectRequest, StreamingBody};
-use rusoto_core::{Region};
+use rusoto_s3::{S3, S3Client, GetObjectRequest, PutObjectRequest, PutObjectOutput, PutObjectError, StreamingBody};
+use rusoto_core::{Region, RusotoError};
 use rusoto_credential::ProfileProvider;
 use rusoto_core::request::HttpClient;
 use rand::Rng;
@@ -34,9 +34,39 @@ impl Config {
     }
 }
 
-fn remove_whitespace(s: &str) -> String {
-    s.split_whitespace().collect()
+struct PutRequest {
+    src: String,
+    dest: String,
+    mime: String,
 }
+
+trait S3ClientExt {
+    fn put_file(&self, config: &Config, put_request: PutRequest) -> Result<PutObjectOutput, RusotoError<PutObjectError>>;
+}
+
+impl S3ClientExt for S3Client {
+    fn put_file(&self, config: &Config, put_request: PutRequest) -> Result<PutObjectOutput, RusotoError<PutObjectError>> {
+        let contents = get_file_contents(&put_request.src);
+        let meta = ::std::fs::metadata(&put_request.src).unwrap();
+        let stream = ::futures::stream::once(futures::future::ready(Ok(contents.into())));
+
+        let put_req = PutObjectRequest {
+            bucket: config.s3_bucket.to_owned(),
+            key: String::from(&put_request.dest),
+            content_length: Some(meta.len() as i64),
+            content_type: Some(put_request.mime),
+            body: Some(StreamingBody::new(stream)),
+            ..Default::default()
+        };
+
+        let result = Runtime::new().unwrap().block_on(self.put_object(put_req));
+
+        println!("Deploying {} to {}/{} \nResult: {:?}", &put_request.src, config.s3_bucket, put_request.dest, result);
+
+        result
+    }
+}
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     
@@ -178,7 +208,6 @@ fn get_archive(url: &str) -> Result<String, Box<dyn std::error::Error>> {
 }
 
 fn get_s3_client(config: &Config) -> Result<S3Client, Box<dyn std::error::Error>> {
-    //let config = parse_config()?;
 
     let provider = ProfileProvider::with_default_credentials(&config.profile);
     let client = S3Client::new_with(
@@ -203,68 +232,35 @@ fn get_s3_latest(config: &Config, client: &S3Client) -> Result<String, Box<dyn s
     let mut body = Runtime::new().unwrap().block_on(stream.map_ok(|b| bytes::BytesMut::from(&b[..])).try_concat()).unwrap().freeze();
     let b = body.split_to(body.len());
     let string = String::from_utf8(b.to_vec())?;
-    let string = remove_whitespace(&string);
 
     Ok(string)
 }
 
+
 fn put_s3_latest(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
-
-    let contents = get_file_contents("./scraped/latest.txt");
-    let meta = ::std::fs::metadata("./scraped/latest.txt").unwrap();
-    let stream = ::futures::stream::once(futures::future::ready(Ok(contents.into())));
-
-    let put_req = PutObjectRequest {
-        bucket: config.s3_bucket.to_owned(),
-        key: String::from("latest.txt"),
-        content_length: Some(meta.len() as i64),
-        content_type: Some(String::from("text/plain")),
-        body: Some(StreamingBody::new(stream)),
-        ..Default::default()
-    };
-
-    let result = Runtime::new().unwrap().block_on(client.put_object(put_req));
-
-    println!("Deploy latest.txt Result: {:?}", result);
+    
+    let _result = client.put_file(&config, PutRequest{
+        src: String::from("./scraped/latest.txt"),
+        dest: String::from("latest.txt"),
+        mime: String::from("text/plain"),
+    });
 
     Ok(())
 }
 
 fn deploy_build(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
-    
-    let contents = get_file_contents("./build/index.html");
-    let meta = ::std::fs::metadata("./build/index.html").unwrap();
-    let index_stream = ::futures::stream::once(futures::future::ready(Ok(contents.into())));
 
-    let put_req = PutObjectRequest {
-        bucket: config.s3_bucket.to_owned(),
-        key: String::from("index.html"),
-        content_length: Some(meta.len() as i64),
-        content_type: Some(String::from("text/html")),
-        body: Some(StreamingBody::new(index_stream)),
-        ..Default::default()
-    };
+    let _result = client.put_file(&config, PutRequest{
+        src: String::from("./build/index.html"),
+        dest: String::from("index.html"),
+        mime: String::from("text/html"),
+    });
 
-    let result = Runtime::new().unwrap().block_on(client.put_object(put_req));
-
-    println!("Deploy index.html Result: {:?}", result);
-
-    let contents = get_file_contents("./build/archive.html");
-    let meta = ::std::fs::metadata("./build/archive.html").unwrap();
-    let index_stream = ::futures::stream::once(futures::future::ready(Ok(contents.into())));
-
-    let put_req = PutObjectRequest {
-        bucket: config.s3_bucket.to_owned(),
-        key: String::from("archive.html"),
-        content_length: Some(meta.len() as i64),
-        content_type: Some(String::from("text/html")),
-        body: Some(StreamingBody::new(index_stream)),
-        ..Default::default()
-    };
-
-    let result = Runtime::new().unwrap().block_on(client.put_object(put_req));
-
-    println!("Deploy archive.html Result: {:?}", result);
+    let _result = client.put_file(&config, PutRequest{
+        src: String::from("./build/archive.html"),
+        dest: String::from("archive.html"),
+        mime: String::from("text/html"),
+    });
 
     Ok(())
 }
