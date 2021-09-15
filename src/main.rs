@@ -118,9 +118,9 @@ fn build_index(latest: &LatestResult) -> Result<(), Box<dyn std::error::Error>> 
     let mut index_fh = get_file_handle("./build/index.html");
     let templates_top = get_file_contents("./templates/top.html");
     let templates_bottom = get_file_contents("./templates/bottom.html");
-    write!(index_fh, "{}", templates_top);
-    write!(index_fh, "{}", latest.html);
-    write!(index_fh, "{}", templates_bottom);
+    write!(index_fh, "{}", templates_top)?;
+    write!(index_fh, "{}", latest.html)?;
+    write!(index_fh, "{}", templates_bottom)?;
 
     Ok(())
 }
@@ -129,9 +129,9 @@ fn build_archive(html: String) -> Result<(), Box<dyn std::error::Error>> {
     let mut archive_fh = get_file_handle("./build/archive.html");
     let templates_top = get_file_contents("./templates/top.html");
     let templates_bottom = get_file_contents("./templates/bottom.html");
-    write!(archive_fh, "{}", templates_top);
-    write!(archive_fh, "{}", html);
-    write!(archive_fh, "{}", templates_bottom);
+    write!(archive_fh, "{}", templates_top)?;
+    write!(archive_fh, "{}", html)?;
+    write!(archive_fh, "{}", templates_bottom)?;
 
     Ok(())
 }
