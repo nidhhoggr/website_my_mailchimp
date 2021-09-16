@@ -1,7 +1,9 @@
 use scraper::{Html, Selector};
 use configparser::ini::Ini;
-use std::{fs,str};
+use std::{fs,str,env};
 use std::io::Write;
+use std::path::Path;
+
 
 use rusoto_cloudfront::{CloudFront, CloudFrontClient, CreateInvalidationRequest, InvalidationBatch, Paths};
 use rusoto_s3::{S3, S3Client, GetObjectRequest, PutObjectRequest, PutObjectOutput, PutObjectError, StreamingBody};
@@ -67,18 +69,42 @@ impl S3ClientExt for S3Client {
     }
 }
 
+struct SysPaths {
+    dir: String,
+    exe: String,
+}
+
+fn get_paths() -> Result<SysPaths, Box<dyn std::error::Error>> {  
+    let dir = env::current_dir()?.display().to_string();
+    let current_exe = env::current_exe()?.display().to_string();
+    let exe = Path::new(&current_exe).parent().unwrap().display().to_string();
+    
+    Ok(SysPaths {
+        dir,
+        exe,
+    })
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let config = parse_config()?;
 
+    let paths = get_paths()?;
+
+    assert!(Path::new(&format!("{}/config.ini", &paths.dir)).exists(), "config.ini must exist at {}", &paths.dir);
+    assert!(Path::new(&format!("{}/templates/top.html", &paths.dir)).exists(), "top.html must exist at {}/templates/", &paths.dir);
+    assert!(Path::new(&format!("{}/templates/bottom.html", &paths.dir)).exists(), "bottom.html exist at {}/templates/", &paths.dir);
+
     let latest_res: LatestResult = get_latest(&config.mc_campaign_url)?;
-    println!("Latest link: {}", latest_res.link);
+
+    println!("Latest link from Mailchimp: {}", latest_res.link);
 
     let s3_client = get_s3_client(&config)?;
     
     let s3_latest = get_s3_latest(&config, &s3_client)?;
+    
     println!("Latest link from S3: {}", s3_latest);
+    
     if s3_latest.ne(&latest_res.link) {
         println!("Running jobs!");
         build_index(&latest_res)?;
@@ -89,7 +115,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         put_s3_latest(&config, &s3_client)?;
     }
     else {
-        println!("File already matches");
+        println!("s3 already contains latest copy");
+		//download_image("https://www.rust-lang.org/logos/rust-logo-512x512.png")?;
     }
 
     Ok(())
@@ -115,9 +142,9 @@ fn parse_config() -> Result<Config, Box<dyn std::error::Error>> {
 }
 
 fn build_index(latest: &LatestResult) -> Result<(), Box<dyn std::error::Error>> {
-    let mut index_fh = get_file_handle("./build/index.html");
-    let templates_top = get_file_contents("./templates/top.html");
-    let templates_bottom = get_file_contents("./templates/bottom.html");
+    let mut index_fh = get_file_handle("dist/index.html")?;
+    let templates_top = get_file_contents("templates/top.html");
+    let templates_bottom = get_file_contents("templates/bottom.html");
     write!(index_fh, "{}", templates_top)?;
     write!(index_fh, "{}", latest.html)?;
     write!(index_fh, "{}", templates_bottom)?;
@@ -126,9 +153,9 @@ fn build_index(latest: &LatestResult) -> Result<(), Box<dyn std::error::Error>> 
 }
 
 fn build_archive(html: String) -> Result<(), Box<dyn std::error::Error>> {
-    let mut archive_fh = get_file_handle("./build/archive.html");
-    let templates_top = get_file_contents("./templates/top.html");
-    let templates_bottom = get_file_contents("./templates/bottom.html");
+    let mut archive_fh = get_file_handle("dist/archive.html")?;
+    let templates_top = get_file_contents("templates/top.html");
+    let templates_bottom = get_file_contents("templates/bottom.html");
     write!(archive_fh, "{}", templates_top)?;
     write!(archive_fh, "{}", html)?;
     write!(archive_fh, "{}", templates_bottom)?;
@@ -143,18 +170,31 @@ fn get_file_contents(filename: &str) -> String {
     contents
 }
 
-fn get_file_handle(filename: &str) -> std::fs::File {
+fn get_file_handle(filename: &str) -> Result<std::fs::File, Box<dyn std::error::Error>> {
+
+    let paths = get_paths()?;
 
     println!("Getting file handle for: {}", filename);
+
+    let path = Path::new(filename);
+        
+    let object_prefix = path.parent().unwrap().to_str().unwrap();
+
+    let fname = path.file_name().unwrap().to_str().unwrap();
+
+    let output_dir = format!("{}/{}/", &paths.exe, &object_prefix);
+
+    println!("will be located under: '{}'", &output_dir);
+
+    fs::create_dir_all(&output_dir)?;
 
     let file = fs::OpenOptions::new()
         .write(true)
         .create(true)
         .truncate(true)
-        .open(filename)
-        .unwrap();
+        .open(format!("{}/{}", &output_dir, &fname))?;
 
-    file
+    Ok(file)
 }
 
 
@@ -182,8 +222,14 @@ fn get_latest(url: &str) -> Result<LatestResult, Box<dyn std::error::Error>> {
 
     let node = fragment.select(&selector_items).next().unwrap();
    
-    fs::write("./scraped/latest.html", node.html()).expect("Unable to write file");
-    fs::write("./scraped/latest.txt", title_href).expect("Unable to write file");
+    let paths = get_paths()?;
+
+    let output_dir = format!("{}/scraped", paths.exe);
+
+    fs::create_dir_all(&output_dir)?;
+
+    fs::write(&format!("{}/latest.html", output_dir), node.html()).expect("Unable to write file");
+    fs::write(&format!("{}/latest.txt", output_dir), title_href).expect("Unable to write file");
 
     Ok(LatestResult{
         html: node.html(),
@@ -191,6 +237,42 @@ fn get_latest(url: &str) -> Result<LatestResult, Box<dyn std::error::Error>> {
     })
 }
 
+fn download_image(url: &str) -> Result<(), Box<dyn std::error::Error>> {
+
+    let response = reqwest::blocking::get(url)?;
+
+    let mut dest = {
+    
+        let fname = response
+            .url()
+            .path_segments()
+            .and_then(|segments| segments.last())
+            .and_then(|name| if name.is_empty() { None } else { Some(name) })
+            .unwrap_or("tmp.bin");
+            
+		println!("file to download: '{}'", fname);
+
+        let paths = get_paths()?;
+
+		let output_dir = format!("{}/{}", &paths.exe, "dist/assets");
+
+		fs::create_dir_all(output_dir.clone())?;
+
+		println!("will be located under: '{}'", output_dir.clone());
+
+		let output_fname = format!("{}/{}", output_dir, fname);
+		
+		println!("Creating the file {}", output_fname);
+
+		fs::File::create(output_fname)?
+    };
+    
+	let content =  response.bytes()?;
+
+	dest.write_all(&content)?;
+
+	Ok(())
+}
 
 fn get_archive(url: &str) -> Result<String, Box<dyn std::error::Error>> {
 
@@ -202,7 +284,9 @@ fn get_archive(url: &str) -> Result<String, Box<dyn std::error::Error>> {
     
     let node = fragment.select(&selector_items).next().unwrap();
 
-    fs::write("./scraped/archive.html", node.html()).expect("Unable to write file");
+    let paths = get_paths()?;
+
+    fs::write(&format!("{}/scraped/archive.html", paths.exe), node.html()).expect("Unable to write file");
 
     Ok(node.html())
 }
@@ -240,7 +324,7 @@ fn get_s3_latest(config: &Config, client: &S3Client) -> Result<String, Box<dyn s
 fn put_s3_latest(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
     
     let _result = client.put_file(&config, PutRequest{
-        src: String::from("./scraped/latest.txt"),
+        src: String::from("scraped/latest.txt"),
         dest: String::from("latest.txt"),
         mime: String::from("text/plain"),
     });
@@ -251,13 +335,13 @@ fn put_s3_latest(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::
 fn deploy_build(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
 
     let _result = client.put_file(&config, PutRequest{
-        src: String::from("./build/index.html"),
+        src: String::from("dist/index.html"),
         dest: String::from("index.html"),
         mime: String::from("text/html"),
     });
 
     let _result = client.put_file(&config, PutRequest{
-        src: String::from("./build/archive.html"),
+        src: String::from("dist/archive.html"),
         dest: String::from("archive.html"),
         mime: String::from("text/html"),
     });

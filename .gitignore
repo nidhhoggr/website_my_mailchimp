@@ -1,7 +1,7 @@
 /target
 /templates/top.html
 /templates/bottom.html
-/scraped/*.html
-/scraped/latest.txt
-/build/*.html
+/scraped/*
+/dist/*
 config.ini
+website_my_mailchimp
