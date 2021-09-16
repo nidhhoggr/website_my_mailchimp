@@ -1815,6 +1815,7 @@ dependencies = [
  "bytes",
  "configparser",
  "futures",
+ "mime",
  "rand 0.8.4",
  "reqwest",
  "rusoto_cloudfront",
@@ -1823,6 +1824,7 @@ dependencies = [
  "rusoto_s3",
  "scraper",
  "tokio",
+ "url",
 ]
 
 [[package]]

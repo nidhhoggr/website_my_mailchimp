@@ -16,7 +16,6 @@ can be manually executed or easily automated with a task scheduler.
 1. a Cloudfront Distro hosting the S3 bucket (todo: make optional)
 1. awscli installed profile and credentials on the box the script is to be ran (todo: all explicit credential provider via config.ini)
 
-
 ### Copy over the templates or make your own
 ```bash
 cp templates/top.sample.html templates/top.html
@@ -36,9 +35,7 @@ aws configure
 ### Issues
 1. Assumes you are hosting your s3 bucket from Cloudfront.
 1. Currently relies on awscli configured profile containing the keys.
-1. Currently the mailchimp images are hosted on thier own CDN. This results in slow load times or 400 error codes when loaded from the s3 endpoint. In order 
-to solve for this, the images must be scraped and uploaded to your own s3 bucket. Next, some basic javascript must run through and update the src attributes of
-all images to point to your own s3 bucket.
+1. Currently the mailchimp images are hosted on thier own CDN. This results in slow load times or 400 error codes when loaded from the s3 endpoint. In order to solve for this, the images are scraped and uploaded by this program to your s3 bucket. Some basic javascript must run through and update the src attributes of all images to point to your s3 bucket.
 ```javascript
         const srcUrl = $(e).attr('src');
         if (srcUrl.includes("gallery.mailchimp.com") || srcUrl.includes("mcusercontent.com")) {
@@ -51,6 +48,5 @@ all images to point to your own s3 bucket.
 
 ### Todo
 1. provide AWS Lambda integration for easier automated updates
-1. scrape and upload all mailchimp images
 1. Allow for a config.ini AWS access key fallback
 
