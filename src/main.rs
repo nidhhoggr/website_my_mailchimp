@@ -40,20 +40,20 @@ impl Config {
 }
 
 #[derive(Debug)]
+enum S3Content {
+    Img(String),
+    Text(String),
+}
+
+#[derive(Debug)]
 struct PutRequest {
-    src: String,
+    src: S3Content,
     dest: String,
     mime: String,
 }
 
 trait S3ClientExt {
     fn put_file(
-        &self,
-        config: &Config,
-        put_request: PutRequest,
-    ) -> Result<PutObjectOutput, RusotoError<PutObjectError>>;
-
-    fn put_img(
         &self,
         config: &Config,
         put_request: PutRequest,
@@ -66,44 +66,30 @@ impl S3ClientExt for S3Client {
         config: &Config,
         put_request: PutRequest,
     ) -> Result<PutObjectOutput, RusotoError<PutObjectError>> {
-        let contents = get_file_contents(&put_request.src);
-        let meta = ::std::fs::metadata(&put_request.src).unwrap();
-        let stream = ::futures::stream::once(futures::future::ready(Ok(contents.into())));
+        let (meta, body) = match &put_request.src {
+            S3Content::Text(src) => {
+                let contents = get_file_contents(&src);
+                let meta = ::std::fs::metadata(&src).unwrap();
+                let stream = ::futures::stream::once(futures::future::ready(Ok(contents.into())));
+                let body = Some(StreamingBody::new(stream));
 
-        let put_req = PutObjectRequest {
-            bucket: config.s3_bucket.to_owned(),
-            key: String::from(&put_request.dest),
-            content_length: Some(meta.len() as i64),
-            content_type: Some(put_request.mime.clone()),
-            body: Some(StreamingBody::new(stream)),
-            ..Default::default()
+                (meta, body)
+            }
+            S3Content::Img(src) => {
+                let contents = fs::read(&src).unwrap();
+                let meta = ::std::fs::metadata(&src).unwrap();
+                let body = Some(contents.into());
+
+                (meta, body)
+            }
         };
 
-        let result = Runtime::new().unwrap().block_on(self.put_object(put_req));
-
-        println!(
-            "Deploying {:?} to {}/{} \nResult: {:?}",
-            &put_request, config.s3_bucket, put_request.dest, result
-        );
-
-        result
-    }
-
-    fn put_img(
-        &self,
-        config: &Config,
-        put_request: PutRequest,
-    ) -> Result<PutObjectOutput, RusotoError<PutObjectError>> {
-        let contents = fs::read(&put_request.src).unwrap();
-
-        let meta = ::std::fs::metadata(&put_request.src).unwrap();
-
         let put_req = PutObjectRequest {
             bucket: config.s3_bucket.to_owned(),
             key: String::from(&put_request.dest),
             content_length: Some(meta.len() as i64),
             content_type: Some(put_request.mime.clone()),
-            body: Some(contents.into()),
+            body: body,
             ..Default::default()
         };
 
@@ -273,7 +259,7 @@ fn get_and_put_images(
         let hostname = url.host_str();
         if hostname == Some("gallery.mailchimp.com") || hostname == Some("mcusercontent.com") {
             let put_req = download_image(&src, "dist/assets/mailchimpGallery")?;
-            let _result = client.put_img(&config, put_req);
+            let _result = client.put_file(&config, put_req);
         }
     }
 
@@ -364,7 +350,7 @@ fn download_image(url: &str, dst_dir: &str) -> Result<PutRequest, Box<dyn std::e
     };
 
     Ok(PutRequest {
-        src: String::from(&output_fname),
+        src: S3Content::Img(output_fname),
         dest: String::from(&s3_dst),
         mime: format!("{}/{}", mime.type_(), mime.subtype()),
     })
@@ -426,7 +412,7 @@ fn put_s3_latest(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::
     let _result = client.put_file(
         &config,
         PutRequest {
-            src: String::from("scraped/latest.txt"),
+            src: S3Content::Text(String::from("scraped/latest.txt")),
             dest: String::from("latest.txt"),
             mime: String::from("text/plain"),
         },
@@ -439,7 +425,7 @@ fn deploy_build(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::e
     let _result = client.put_file(
         &config,
         PutRequest {
-            src: String::from("dist/index.html"),
+            src: S3Content::Text(String::from("dist/index.html")),
             dest: String::from("index.html"),
             mime: String::from("text/html"),
         },
@@ -448,7 +434,7 @@ fn deploy_build(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::e
     let _result = client.put_file(
         &config,
         PutRequest {
-            src: String::from("dist/archive.html"),
+            src: S3Content::Text(String::from("dist/archive.html")),
             dest: String::from("archive.html"),
             mime: String::from("text/html"),
         },
