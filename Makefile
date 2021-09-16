@@ -1,4 +1,5 @@
 all: clean
+	rustfmt src/main.rs
 	cargo build
 	cp $(PWD)/target/debug/website_my_mailchimp $(PWD)/
 	$(PWD)/website_my_mailchimp
