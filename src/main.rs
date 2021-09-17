@@ -1,6 +1,6 @@
 use futures::TryStreamExt;
 use rusoto_core::RusotoError;
-use rusoto_s3::{GetObjectError, GetObjectRequest, S3Client, S3};
+use rusoto_s3::{GetObjectError, GetObjectRequest, PutObjectError, PutObjectOutput, S3Client, S3};
 use scraper::{Html, Selector};
 use std::io::Write;
 use std::path::Path;
@@ -226,22 +226,23 @@ fn put_s3_mailchimp_images(
         if hostname == Some("gallery.mailchimp.com") || hostname == Some("mcusercontent.com") {
             let put_req =
                 website_my_mailchimp::download_image(&src, "dist/assets/mailchimpGallery")?;
-            let _result = client.put_file(&config, put_req);
+            client.put_file(&config, put_req)?;
         }
     }
 
     Ok(())
 }
 
-fn put_s3_lockfile(config: &Config, client: &S3Client) -> Result<(), Box<dyn std::error::Error>> {
-    let _result = client.put_file(
+fn put_s3_lockfile(
+    config: &Config,
+    client: &S3Client,
+) -> Result<PutObjectOutput, RusotoError<PutObjectError>> {
+    client.put_file(
         &config,
         PutRequest {
             src: S3Content::Text(String::from("scraped/lockfile.txt")),
             dest: String::from("lockfile.txt"),
             mime: String::from("text/plain"),
         },
-    );
-
-    Ok(())
+    )
 }
